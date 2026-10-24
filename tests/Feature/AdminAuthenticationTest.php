@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\PlatformAdmin;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -17,19 +18,41 @@ class AdminAuthenticationTest extends TestCase
     {
         $admin = $this->admin();
 
-        $response = $this->frontend('198.51.100.10')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'correct-password']);
+        $response = $this->frontend('198.51.100.10')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'correct-password']);
 
         $response->assertOk()->assertJsonPath('data.email', $admin->email)->assertJsonStructure(['data' => ['id', 'name', 'email', 'is_active']])->assertJsonMissing(['token']);
         $this->assertDatabaseHas('audit_logs', ['action' => 'admin.login.succeeded']);
         $this->frontend()->getJson('/api/v1/admin/auth/me')->assertOk();
     }
 
+    public function test_admin_can_login_with_username(): void
+    {
+        $admin = $this->admin();
+
+        $this->frontend('198.51.100.15')->postJson('/api/v1/admin/auth/login', ['login' => 'PRIMARY.ADMIN', 'password' => 'correct-password'])
+            ->assertOk()->assertJsonPath('data.username', $admin->username);
+    }
+
+    public function test_duplicate_usernames_are_rejected_by_postgresql(): void
+    {
+        $this->admin();
+
+        $this->expectException(QueryException::class);
+        PlatformAdmin::create([
+            'name' => 'Duplicate Admin',
+            'username' => 'PRIMARY.ADMIN',
+            'email' => 'duplicate@example.com',
+            'password' => Hash::make('correct-password'),
+            'is_active' => true,
+        ]);
+    }
+
     public function test_invalid_credentials_are_rejected_without_leaking_secrets(): void
     {
         $admin = $this->admin();
 
-        $this->frontend('198.51.100.11')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'wrong-password'])
-            ->assertStatus(422)->assertJsonValidationErrors('email');
+        $this->frontend('198.51.100.11')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'wrong-password'])
+            ->assertStatus(422)->assertJsonValidationErrors('login');
         $this->assertDatabaseHas('audit_logs', ['action' => 'admin.login.failed']);
     }
 
@@ -37,8 +60,8 @@ class AdminAuthenticationTest extends TestCase
     {
         $admin = $this->admin(['is_active' => false]);
 
-        $this->frontend('198.51.100.12')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'correct-password'])
-            ->assertStatus(422)->assertJsonValidationErrors('email');
+        $this->frontend('198.51.100.12')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'correct-password'])
+            ->assertStatus(422)->assertJsonValidationErrors('login');
         $this->assertDatabaseHas('audit_logs', ['action' => 'admin.login.inactive']);
     }
 
@@ -54,7 +77,7 @@ class AdminAuthenticationTest extends TestCase
     {
         $admin = $this->admin();
 
-        $this->frontend('198.51.100.13')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'correct-password'])->assertOk();
+        $this->frontend('198.51.100.13')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'correct-password'])->assertOk();
         $this->frontend('198.51.100.13')->postJson('/api/v1/admin/auth/logout')->assertOk();
         Auth::forgetGuards();
         $this->frontend()->getJson('/api/v1/admin/auth/me')->assertUnauthorized();
@@ -63,7 +86,7 @@ class AdminAuthenticationTest extends TestCase
     public function test_inactive_authenticated_admin_is_rejected_and_session_is_removed(): void
     {
         $admin = $this->admin();
-        $this->frontend('198.51.100.14')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'correct-password'])->assertOk();
+        $this->frontend('198.51.100.14')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'correct-password'])->assertOk();
         $admin->update(['is_active' => false]);
         Auth::forgetGuards();
 
@@ -79,11 +102,11 @@ class AdminAuthenticationTest extends TestCase
         \Illuminate\Support\Facades\RateLimiter::clear('admin-login|198.51.100.43');
 
         for ($attempt = 0; $attempt < 5; $attempt++) {
-            $this->frontend('198.51.100.43')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'wrong-password'])->assertStatus(422);
+            $this->frontend('198.51.100.43')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'wrong-password'])->assertStatus(422);
         }
 
-        $this->frontend('198.51.100.43')->postJson('/api/v1/admin/auth/login', ['email' => $admin->email, 'password' => 'wrong-password'])
-            ->assertStatus(422)->assertJsonValidationErrors('email');
+        $this->frontend('198.51.100.43')->postJson('/api/v1/admin/auth/login', ['login' => $admin->email, 'password' => 'wrong-password'])
+            ->assertStatus(422)->assertJsonValidationErrors('login');
         $this->assertDatabaseHas('audit_logs', ['action' => 'admin.login.rate_limited']);
     }
 
@@ -105,6 +128,7 @@ class AdminAuthenticationTest extends TestCase
     {
         return PlatformAdmin::create(array_merge([
             'name' => 'Primary Admin',
+            'username' => 'primary.admin',
             'email' => 'admin@example.com',
             'password' => Hash::make('correct-password'),
             'is_active' => true,

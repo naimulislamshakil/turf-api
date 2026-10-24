@@ -18,8 +18,8 @@ class CreatePlatformAdmin extends Command
         $password = $this->secret('Password (input hidden)');
         $confirmation = $this->secret('Confirm password (input hidden)');
 
-        if (! $password || $password !== $confirmation || strlen($password) < 12) {
-            $this->error('Passwords must match and be at least 12 characters.');
+        if (! $password || $password !== $confirmation || strlen($password) < 8 || strlen($password) > 128) {
+            $this->error('Passwords must match and be between 8 and 128 characters.');
             return self::FAILURE;
         }
 
