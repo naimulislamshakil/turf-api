@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'mram_sms' => [
+        'base_url' => env('MRAM_SMS_BASE_URL', 'https://msg.mram.com.bd'),
+        'api_key' => env('MRAM_SMS_API_KEY'),
+        'sender_id' => env('MRAM_SMS_SENDER_ID'),
+        'enabled' => filter_var(env('MRAM_SMS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+    ],
+
 ];

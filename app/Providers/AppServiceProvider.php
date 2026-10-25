@@ -5,6 +5,9 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use App\Contracts\SmsGateway;
+use App\Services\NullSmsGateway;
+use App\Services\MramSmsGateway;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -13,7 +16,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(SmsGateway::class, MramSmsGateway::class);
     }
 
     /**
@@ -22,5 +25,6 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for('admin-login', fn ($request) => Limit::perMinute(10)->by($request->ip()));
+        RateLimiter::for('owner-login', fn ($request) => Limit::perMinute(10)->by($request->ip()));
     }
 }

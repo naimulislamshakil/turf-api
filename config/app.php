@@ -2,6 +2,8 @@
 
 return [
 
+    'business_billing_timezone' => env('BUSINESS_BILLING_TIMEZONE', 'Asia/Dhaka'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Name

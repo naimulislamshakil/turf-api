@@ -14,7 +14,7 @@ class EnsurePlatformAdmin
         $user = $request->user();
 
         if (! $user instanceof PlatformAdmin) {
-            return response()->json(['message' => 'Platform administrator access required.'], 403);
+            return response()->json(['message' => 'Platform administrator authentication required.'], 401);
         }
 
         if (! $user->is_active) {

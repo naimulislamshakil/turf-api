@@ -5,6 +5,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use App\Http\Middleware\EnsurePlatformAdmin;
+use App\Http\Middleware\EnsureOwnerPasswordChanged;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->alias([
             'platform.admin' => EnsurePlatformAdmin::class,
+            'owner.password.changed' => EnsureOwnerPasswordChanged::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

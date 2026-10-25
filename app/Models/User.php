@@ -13,7 +13,7 @@ use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'username', 'email', 'password'])]
+#[Fillable(['name', 'username', 'email', 'phone', 'password', 'must_change_password', 'temporary_password_expires_at', 'password_changed_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -35,6 +35,9 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'must_change_password' => 'boolean',
+            'temporary_password_expires_at' => 'datetime',
+            'password_changed_at' => 'datetime',
         ];
     }
 
@@ -46,5 +49,10 @@ class User extends Authenticatable
     protected function email(): Attribute
     {
         return Attribute::make(set: fn (?string $value) => $value === null ? null : strtolower(trim($value)));
+    }
+
+    public function businesses()
+    {
+        return $this->belongsToMany(Business::class, 'business_owners')->withTimestamps();
     }
 }

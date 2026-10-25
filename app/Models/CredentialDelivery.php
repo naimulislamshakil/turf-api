@@ -1,0 +1,27 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Model;
+
+class CredentialDelivery extends Model
+{
+    use HasUlids;
+
+    public const CHANNEL_EMAIL = 'email';
+    public const CHANNEL_SMS = 'sms';
+    public const STATUS_QUEUED = 'queued';
+    public const STATUS_ACCEPTED = 'accepted';
+    public const STATUS_REJECTED = 'rejected';
+    public const STATUS_UNKNOWN = 'unknown';
+    public const STATUS_FAILED = 'failed';
+    public const STATUS_UNAVAILABLE = 'unavailable';
+
+    protected $fillable = ['user_id', 'business_id', 'channel', 'destination_hash', 'encrypted_payload', 'status', 'attempts', 'last_error_code', 'provider_reference', 'sent_at'];
+
+    protected function casts(): array
+    {
+        return ['attempts' => 'integer', 'sent_at' => 'datetime'];
+    }
+}
