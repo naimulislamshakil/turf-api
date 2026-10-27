@@ -11,6 +11,8 @@ use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\OwnerCredentialDelivery;
+use App\Services\OwnerTemporaryPasswordGenerator;
+use App\Services\ReissueOwnerCredentials;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +24,7 @@ class BusinessController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Business::query()->with(['owners:id,name,email', 'onboardingPlan:id,name,slug,status'])->latest();
+        $query = Business::query()->with(['owners:id,name,email,must_change_password', 'onboardingPlan:id,name,slug,status'])->latest();
         if ($request->filled('status')) {
             $query->where('status', $request->string('status')->toString());
         }
@@ -47,7 +49,7 @@ class BusinessController extends Controller
             if ($locked->status === CredentialDelivery::STATUS_ACCEPTED) {
                 return ['delivery' => $locked, 'idempotent' => true];
             }
-            if (! $locked->encrypted_payload || ! $owner->must_change_password || ! $owner->temporary_password_expires_at || $owner->temporary_password_expires_at->isPast()) {
+            if ($locked->status === CredentialDelivery::STATUS_SUPERSEDED || ! $locked->encrypted_payload || ! $owner->must_change_password || ! $owner->temporary_password_expires_at || $owner->temporary_password_expires_at->isPast()) {
                 throw ValidationException::withMessages(['delivery' => 'This temporary credential is no longer eligible for delivery retry.']);
             }
             $locked->update(['status' => CredentialDelivery::STATUS_QUEUED, 'last_error_code' => null]);
@@ -59,7 +61,27 @@ class BusinessController extends Controller
         return response()->json(['data' => ['id' => $result['delivery']->id, 'channel' => $result['delivery']->channel, 'status' => $result['delivery']->status], 'idempotent' => $result['idempotent']]);
     }
 
-    public function store(Request $request, AuditLogger $auditLogger)
+    public function reissueCredential(Request $request, Business $business, ReissueOwnerCredentials $reissueOwnerCredentials)
+    {
+        $data = $request->validate([
+            'confirmed' => ['accepted'],
+            'reason' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $result = $reissueOwnerCredentials->execute($business, $request, $data['reason']);
+
+        return response()->json(['data' => [
+            'owner_id' => $result['owner']->id,
+            'credential_expires_at' => $result['owner']->temporary_password_expires_at?->toISOString(),
+            'credential_deliveries' => collect($result['deliveries'])->map(fn (CredentialDelivery $delivery) => [
+                'id' => $delivery->id,
+                'channel' => $delivery->channel,
+                'status' => $delivery->status,
+            ])->values(),
+        ]]);
+    }
+
+    public function store(Request $request, AuditLogger $auditLogger, OwnerTemporaryPasswordGenerator $passwordGenerator)
     {
         $data = $this->validated($request);
         $logoPath = null;
@@ -69,13 +91,13 @@ class BusinessController extends Controller
         }
 
         try {
-            $business = DB::transaction(function () use ($data, $request, $auditLogger, $logoPath): Business {
+            $business = DB::transaction(function () use ($data, $request, $auditLogger, $logoPath, $passwordGenerator): Business {
             $ownerName = $data['owner_name'];
             $ownerUsername = $data['owner_username'];
             $ownerEmail = $data['owner_email'];
             $ownerPhone = $data['owner_phone'];
             unset($data['owner_name'], $data['owner_username'], $data['owner_email'], $data['owner_phone'], $data['logo']);
-            $temporaryPassword = bin2hex(random_bytes(18));
+            $temporaryPassword = $passwordGenerator->generate();
             $owner = User::create([
                 'name' => $ownerName,
                 'username' => $ownerUsername,
@@ -198,7 +220,8 @@ class BusinessController extends Controller
             'address' => $business->address,
             'district_city' => $business->district_city,
             'status' => $business->status,
-            'owner' => $owner ? ['id' => $owner->id, 'name' => $owner->name, 'email' => $owner->email] : null,
+            'owner' => $owner ? ['id' => $owner->id, 'name' => $owner->name, 'email' => $owner->email, 'requires_password_change' => $owner->must_change_password, 'credential_expires_at' => $owner->temporary_password_expires_at?->toISOString()] : null,
+            'can_reissue_credentials' => (bool) ($owner?->must_change_password),
             'owners' => $business->owners->map(fn (User $user) => ['id' => $user->id, 'name' => $user->name, 'email' => $user->email])->values(),
             'onboarding_plan' => $business->onboardingPlan ? ['id' => $business->onboardingPlan->id, 'name' => $business->onboardingPlan->name, 'slug' => $business->onboardingPlan->slug, 'status' => $business->onboardingPlan->status] : null,
             'logo_url' => $business->logo_path ? Storage::disk('public')->url($business->logo_path) : null,

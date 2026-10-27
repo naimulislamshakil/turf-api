@@ -13,6 +13,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Mail\MailManager;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -28,14 +29,15 @@ class DeliverOwnerCredentials implements ShouldQueue, ShouldBeEncrypted
 
     public function handle(MailManager $mailManager, SmsGateway $smsGateway): void
     {
-        $delivery = CredentialDelivery::find($this->deliveryId);
-        if (! $delivery || $delivery->status === CredentialDelivery::STATUS_ACCEPTED) {
-            return;
-        }
+        DB::transaction(function () use ($mailManager, $smsGateway): void {
+            $delivery = CredentialDelivery::query()->whereKey($this->deliveryId)->lockForUpdate()->first();
+            if (! $delivery || in_array($delivery->status, [CredentialDelivery::STATUS_ACCEPTED, CredentialDelivery::STATUS_SUPERSEDED], true)) {
+                return;
+            }
 
-        $delivery->increment('attempts');
-        try {
-            $encryptedPayload = $this->encryptedPayload ?: $delivery->encrypted_payload;
+            $delivery->increment('attempts');
+            try {
+                $encryptedPayload = $this->encryptedPayload ?: $delivery->encrypted_payload;
             if (! $encryptedPayload) {
                 throw new \RuntimeException('Owner credential delivery payload unavailable.');
             }
@@ -68,9 +70,10 @@ class DeliverOwnerCredentials implements ShouldQueue, ShouldBeEncrypted
 
             $delivery->update(['status' => $status, 'last_error_code' => $errorCode, 'provider_reference' => $providerReference, 'sent_at' => $status === CredentialDelivery::STATUS_ACCEPTED ? now() : null, 'encrypted_payload' => $status === CredentialDelivery::STATUS_ACCEPTED ? null : $delivery->encrypted_payload]);
             app(AuditLogger::class)->record('owner.credential.delivery.'.$status, metadata: ['delivery_id' => $delivery->id, 'channel' => $delivery->channel, 'business_id' => $delivery->business_id]);
-        } catch (Throwable) {
-            throw new \RuntimeException('Owner credential delivery failed.');
-        }
+            } catch (Throwable) {
+                throw new \RuntimeException('Owner credential delivery failed.');
+            }
+        });
     }
 
     public function failed(Throwable $exception): void

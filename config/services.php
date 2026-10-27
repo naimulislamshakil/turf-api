@@ -37,9 +37,19 @@ return [
 
     'mram_sms' => [
         'base_url' => env('MRAM_SMS_BASE_URL', 'https://msg.mram.com.bd'),
-        'api_key' => env('MRAM_SMS_API_KEY'),
-        'sender_id' => env('MRAM_SMS_SENDER_ID'),
         'enabled' => filter_var(env('MRAM_SMS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'response_diagnostics' => filter_var(env('MRAM_SMS_RESPONSE_DIAGNOSTICS', false), FILTER_VALIDATE_BOOLEAN),
+        'mode' => env('MRAM_SMS_MODE', env('APP_ENV') === 'production' ? null : 'test'),
+        'credentials' => [
+            'test' => [
+                'api_key' => env('MRAM_SMS_TEST_API_KEY'),
+                'sender_id' => env('MRAM_SMS_TEST_SENDER_ID'),
+            ],
+            'live' => [
+                'api_key' => env('MRAM_SMS_LIVE_API_KEY'),
+                'sender_id' => env('MRAM_SMS_LIVE_SENDER_ID'),
+            ],
+        ],
     ],
 
 ];

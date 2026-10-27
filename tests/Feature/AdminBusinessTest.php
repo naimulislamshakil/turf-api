@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -44,6 +45,26 @@ class AdminBusinessTest extends TestCase
         $this->assertStringNotContainsString('temporary_password', json_encode($response->json()));
         $this->adminSession()->getJson('/api/v1/admin/businesses')->assertOk()->assertJsonPath('data.0.slug', 'green-field');
         $this->assertDatabaseHas('audit_logs', ['action' => 'admin.business.created']);
+    }
+
+    public function test_new_owner_receives_an_eight_digit_hashed_temporary_password(): void
+    {
+        Queue::fake();
+
+        $response = $this->adminSession()->postJson('/api/v1/admin/businesses', $this->payload())->assertCreated();
+        $owner = User::where('email', 'owner@green-field.test')->firstOrFail();
+        $delivery = \App\Models\CredentialDelivery::query()
+            ->where('business_id', $response->json('data.id'))
+            ->where('channel', 'sms')
+            ->firstOrFail();
+        $credentials = json_decode(Crypt::decryptString($delivery->encrypted_payload), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertMatchesRegularExpression('/^[0-9]{8}$/', $credentials['temporary_password']);
+        $this->assertTrue(Hash::check($credentials['temporary_password'], $owner->password));
+        $this->assertNotSame($credentials['temporary_password'], $owner->password);
+        $this->assertTrue($owner->must_change_password);
+        $this->assertTrue($owner->temporary_password_expires_at->between(now()->addHours(23), now()->addHours(25)));
+        $this->assertStringNotContainsString($credentials['temporary_password'], json_encode($response->json()));
     }
 
     public function test_each_new_business_gets_a_new_owner_identity(): void

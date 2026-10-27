@@ -34,6 +34,7 @@ Route::prefix('v1/admin')->middleware(['auth:sanctum', 'platform.admin'])->group
     Route::post('subscription-payments/{payment}/reject', [BusinessSubscriptionController::class, 'reject']);
     Route::get('businesses/owners', [BusinessController::class, 'owners']);
     Route::post('credential-deliveries/{delivery}/retry', [BusinessController::class, 'retryCredentialDelivery']);
+    Route::post('businesses/{business}/credential-reissue', [BusinessController::class, 'reissueCredential']);
     Route::apiResource('businesses', BusinessController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
     Route::get('businesses/{business}/subscription', [BusinessSubscriptionController::class, 'show']);
     Route::post('businesses/{business}/subscription/payments', [BusinessSubscriptionController::class, 'storePayment']);

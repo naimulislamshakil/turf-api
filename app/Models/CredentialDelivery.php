@@ -17,6 +17,7 @@ class CredentialDelivery extends Model
     public const STATUS_UNKNOWN = 'unknown';
     public const STATUS_FAILED = 'failed';
     public const STATUS_UNAVAILABLE = 'unavailable';
+    public const STATUS_SUPERSEDED = 'superseded';
 
     protected $fillable = ['user_id', 'business_id', 'channel', 'destination_hash', 'encrypted_payload', 'status', 'attempts', 'last_error_code', 'provider_reference', 'sent_at'];
 
