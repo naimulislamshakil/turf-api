@@ -27,13 +27,14 @@ class OwnerCredentialDeliveryTest extends TestCase
     public function test_log_mailer_and_unconfigured_sms_are_marked_unavailable_without_claiming_delivery(): void
     {
         config(['mail.default' => 'log']);
-        $owner = User::factory()->create(['phone' => '+8801912345678']);
+        $owner = User::factory()->create(['phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->addDay()]);
         $business = Business::create(['name' => 'Delivery Test', 'slug' => 'delivery-test', 'phone' => '+8801712345678', 'email' => null, 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
-        $payload = Crypt::encryptString(json_encode(['owner_name' => $owner->name, 'business_name' => $business->name, 'username' => $owner->username, 'email' => $owner->email, 'phone' => $owner->phone, 'temporary_password' => 'never-in-storage', 'expires_at' => now()->addDay()->toISOString()], JSON_THROW_ON_ERROR));
+        $generation = (string) \Illuminate\Support\Str::uuid();
+        $payload = Crypt::encryptString(json_encode(['owner_name' => $owner->name, 'business_name' => $business->name, 'username' => $owner->username, 'email' => $owner->email, 'phone' => $owner->phone, 'temporary_password' => 'never-in-storage', 'expires_at' => now()->addDay()->toISOString(), 'credential_generation' => $generation], JSON_THROW_ON_ERROR));
 
         foreach ([CredentialDelivery::CHANNEL_EMAIL, CredentialDelivery::CHANNEL_SMS] as $channel) {
-            $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'channel' => $channel, 'destination_hash' => hash('sha256', $channel === 'email' ? $owner->email : $owner->phone)]);
-            (new DeliverOwnerCredentials($delivery->id, $payload))->handle(app(MailManager::class), new NullSmsGateway());
+            $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'credential_generation' => $generation, 'channel' => $channel, 'destination_hash' => hash('sha256', $channel === 'email' ? $owner->email : $owner->phone), 'encrypted_payload' => $payload]);
+            (new DeliverOwnerCredentials($delivery->id, $payload, $generation))->handle(app(MailManager::class), new NullSmsGateway());
         }
 
         $this->assertSame(2, CredentialDelivery::where('status', CredentialDelivery::STATUS_UNAVAILABLE)->count());
@@ -46,8 +47,9 @@ class OwnerCredentialDeliveryTest extends TestCase
         Queue::fake();
         $owner = User::factory()->create(['phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->addDay()]);
         $business = Business::create(['name' => 'Retry Test', 'slug' => 'retry-test', 'phone' => '+8801712345678', 'email' => null, 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
-        $payload = Crypt::encryptString(json_encode(['owner_name' => $owner->name, 'business_name' => $business->name, 'username' => $owner->username, 'email' => $owner->email, 'phone' => $owner->phone, 'temporary_password' => 'one-time-secret', 'expires_at' => now()->addDay()->toISOString()], JSON_THROW_ON_ERROR));
-        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => $payload, 'status' => CredentialDelivery::STATUS_UNAVAILABLE]);
+        $generation = (string) \Illuminate\Support\Str::uuid();
+        $payload = Crypt::encryptString(json_encode(['owner_name' => $owner->name, 'business_name' => $business->name, 'username' => $owner->username, 'email' => $owner->email, 'phone' => $owner->phone, 'temporary_password' => 'one-time-secret', 'expires_at' => now()->addDay()->toISOString(), 'credential_generation' => $generation], JSON_THROW_ON_ERROR));
+        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'credential_generation' => $generation, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => $payload, 'status' => CredentialDelivery::STATUS_UNAVAILABLE]);
         $admin = PlatformAdmin::create(['name' => 'Retry Admin', 'email' => 'retry-admin@example.com', 'password' => Hash::make('password'), 'is_active' => true]);
 
         $this->actingAs($admin, 'platform_admin')->withHeader('Origin', 'http://localhost:3000')->postJson('/api/v1/admin/credential-deliveries/'.$delivery->id.'/retry')->assertOk()->assertJsonPath('data.status', CredentialDelivery::STATUS_QUEUED);
@@ -55,12 +57,36 @@ class OwnerCredentialDeliveryTest extends TestCase
         $this->assertDatabaseHas('credential_deliveries', ['id' => $delivery->id, 'status' => CredentialDelivery::STATUS_QUEUED]);
     }
 
+    public function test_legacy_delivery_without_generation_is_not_sent(): void
+    {
+        $owner = User::factory()->create(['phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->addDay()]);
+        $business = Business::create(['name' => 'Legacy Delivery Test', 'slug' => 'legacy-delivery-test', 'phone' => '+8801712345678', 'email' => null, 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
+        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => 'legacy-payload', 'status' => CredentialDelivery::STATUS_QUEUED]);
+
+        (new DeliverOwnerCredentials($delivery->id, 'legacy-payload'))->handle(app(MailManager::class), new NullSmsGateway());
+
+        $this->assertDatabaseHas('credential_deliveries', ['id' => $delivery->id, 'status' => CredentialDelivery::STATUS_UNKNOWN, 'last_error_code' => 'credential_generation_unverified']);
+    }
+
+    public function test_expired_processing_claim_is_reconciled_without_dispatching_a_new_delivery(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create(['phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->addDay()]);
+        $business = Business::create(['name' => 'Lease Test', 'slug' => 'lease-test', 'phone' => '+8801712345678', 'email' => null, 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
+        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'credential_generation' => (string) \Illuminate\Support\Str::uuid(), 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'status' => CredentialDelivery::STATUS_PROCESSING, 'claim_token' => (string) \Illuminate\Support\Str::uuid(), 'claimed_at' => now()->subHour()]);
+
+        $this->artisan('credentials:reconcile-delivery-claims')->assertExitCode(0);
+
+        $this->assertDatabaseHas('credential_deliveries', ['id' => $delivery->id, 'status' => CredentialDelivery::STATUS_UNKNOWN, 'last_error_code' => 'processing_lease_expired']);
+        Queue::assertNothingPushed();
+    }
+
     public function test_expired_delivery_retry_remains_blocked(): void
     {
         $owner = User::factory()->create(['phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->subMinute()]);
         $business = Business::create(['name' => 'Expired Retry Test', 'slug' => 'expired-retry-test', 'phone' => '+8801712345678', 'email' => null, 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
         $business->owners()->attach($owner->id, ['id' => (string) \Illuminate\Support\Str::ulid()]);
-        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => 'redacted-test-payload', 'status' => CredentialDelivery::STATUS_UNKNOWN]);
+        $delivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'credential_generation' => (string) \Illuminate\Support\Str::uuid(), 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => 'redacted-test-payload', 'status' => CredentialDelivery::STATUS_UNKNOWN]);
 
         $this->actingAs($this->admin(), 'platform_admin')
             ->postJson('/api/v1/admin/credential-deliveries/'.$delivery->id.'/retry')
@@ -74,8 +100,9 @@ class OwnerCredentialDeliveryTest extends TestCase
         $owner = User::factory()->create(['password' => Hash::make('old-temporary-password'), 'phone' => '+8801912345678', 'must_change_password' => true, 'temporary_password_expires_at' => now()->subDay()]);
         $business = Business::create(['name' => 'Reissue Test', 'slug' => 'reissue-test', 'phone' => '+8801712345678', 'email' => 'business@example.com', 'address' => 'Address', 'district_city' => 'Dhaka', 'status' => Business::STATUS_PENDING]);
         $business->owners()->attach($owner->id, ['id' => (string) \Illuminate\Support\Str::ulid()]);
-        $oldPayload = Crypt::encryptString(json_encode(['temporary_password' => 'old-temporary-password'], JSON_THROW_ON_ERROR));
-        $oldDelivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => $oldPayload, 'status' => CredentialDelivery::STATUS_UNKNOWN]);
+        $oldGeneration = (string) \Illuminate\Support\Str::uuid();
+        $oldPayload = Crypt::encryptString(json_encode(['temporary_password' => 'old-temporary-password', 'credential_generation' => $oldGeneration], JSON_THROW_ON_ERROR));
+        $oldDelivery = CredentialDelivery::create(['user_id' => $owner->id, 'business_id' => $business->id, 'credential_generation' => $oldGeneration, 'channel' => CredentialDelivery::CHANNEL_SMS, 'destination_hash' => hash('sha256', $owner->phone), 'encrypted_payload' => $oldPayload, 'status' => CredentialDelivery::STATUS_UNKNOWN]);
 
         $response = $this->actingAs($this->admin(), 'platform_admin')
             ->postJson('/api/v1/admin/businesses/'.$business->id.'/credential-reissue', ['confirmed' => true, 'reason' => 'Expired credential requires replacement.'])

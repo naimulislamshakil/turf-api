@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Str;
 
 class ReissueOwnerCredentials
 {
@@ -33,6 +34,7 @@ class ReissueOwnerCredentials
 
             $temporaryPassword = $this->passwordGenerator->generate();
             $expiresAt = now()->addDay();
+            $credentialGeneration = (string) Str::uuid();
             $owner->forceFill([
                 'password' => Hash::make($temporaryPassword),
                 'must_change_password' => true,
@@ -61,6 +63,7 @@ class ReissueOwnerCredentials
                 'phone' => $owner->phone,
                 'temporary_password' => $temporaryPassword,
                 'expires_at' => $expiresAt->toISOString(),
+                'credential_generation' => $credentialGeneration,
             ], JSON_THROW_ON_ERROR));
 
             $deliveries = [];
@@ -71,12 +74,13 @@ class ReissueOwnerCredentials
                 $delivery = CredentialDelivery::create([
                     'user_id' => $owner->id,
                     'business_id' => $lockedBusiness->id,
+                    'credential_generation' => $credentialGeneration,
                     'channel' => $channel,
                     'destination_hash' => hash('sha256', (string) $destination),
                     'encrypted_payload' => $payload,
                     'status' => CredentialDelivery::STATUS_QUEUED,
                 ]);
-                DeliverOwnerCredentials::dispatch($delivery->id, $payload)->afterCommit();
+                DeliverOwnerCredentials::dispatch($delivery->id, $payload, $credentialGeneration)->afterCommit();
                 $deliveries[] = $delivery;
             }
 

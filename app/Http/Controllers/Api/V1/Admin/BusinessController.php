@@ -49,16 +49,23 @@ class BusinessController extends Controller
             if ($locked->status === CredentialDelivery::STATUS_ACCEPTED) {
                 return ['delivery' => $locked, 'idempotent' => true];
             }
-            if ($locked->status === CredentialDelivery::STATUS_SUPERSEDED || ! $locked->encrypted_payload || ! $owner->must_change_password || ! $owner->temporary_password_expires_at || $owner->temporary_password_expires_at->isPast()) {
+            if ($locked->status === CredentialDelivery::STATUS_QUEUED) {
+                return ['delivery' => $locked, 'idempotent' => true];
+            }
+            if ($locked->status === CredentialDelivery::STATUS_PROCESSING) {
+                throw ValidationException::withMessages(['delivery' => 'This credential delivery is currently being processed.']);
+            }
+            if ($locked->status === CredentialDelivery::STATUS_SUPERSEDED || ! $locked->credential_generation || ! $locked->encrypted_payload || ! $owner->must_change_password || ! $owner->temporary_password_expires_at || $owner->temporary_password_expires_at->isPast()) {
                 throw ValidationException::withMessages(['delivery' => 'This temporary credential is no longer eligible for delivery retry.']);
             }
-            $locked->update(['status' => CredentialDelivery::STATUS_QUEUED, 'last_error_code' => null]);
-            DeliverOwnerCredentials::dispatch($locked->id, $locked->encrypted_payload)->afterCommit();
+            $duplicateDeliveryWarning = $locked->status === CredentialDelivery::STATUS_UNKNOWN;
+            $locked->update(['status' => CredentialDelivery::STATUS_QUEUED, 'claim_token' => null, 'claimed_at' => null, 'last_error_code' => null]);
+            DeliverOwnerCredentials::dispatch($locked->id, $locked->encrypted_payload, $locked->credential_generation)->afterCommit();
             $auditLogger->record('owner.credential.delivery.retry_queued', $request->user(), $request, ['delivery_id' => $locked->id, 'business_id' => $locked->business_id, 'channel' => $locked->channel]);
-            return ['delivery' => $locked->refresh(), 'idempotent' => false];
+            return ['delivery' => $locked->refresh(), 'idempotent' => false, 'duplicate_delivery_warning' => $duplicateDeliveryWarning];
         });
 
-        return response()->json(['data' => ['id' => $result['delivery']->id, 'channel' => $result['delivery']->channel, 'status' => $result['delivery']->status], 'idempotent' => $result['idempotent']]);
+        return response()->json(['data' => ['id' => $result['delivery']->id, 'channel' => $result['delivery']->channel, 'status' => $result['delivery']->status], 'idempotent' => $result['idempotent'], 'duplicate_delivery_warning' => $result['duplicate_delivery_warning'] ?? false]);
     }
 
     public function reissueCredential(Request $request, Business $business, ReissueOwnerCredentials $reissueOwnerCredentials)
@@ -96,6 +103,7 @@ class BusinessController extends Controller
             $ownerUsername = $data['owner_username'];
             $ownerEmail = $data['owner_email'];
             $ownerPhone = $data['owner_phone'];
+            $credentialGeneration = (string) Str::uuid();
             unset($data['owner_name'], $data['owner_username'], $data['owner_email'], $data['owner_phone'], $data['logo']);
             $temporaryPassword = $passwordGenerator->generate();
             $owner = User::create([
@@ -109,7 +117,7 @@ class BusinessController extends Controller
             ]);
             $business = Business::create(array_merge($data, ['logo_path' => $logoPath, 'status' => Business::STATUS_PENDING]));
             $business->owners()->attach($owner->id, ['id' => (string) Str::ulid()]);
-            app(OwnerCredentialDelivery::class)->queue($owner, $business, $temporaryPassword);
+            app(OwnerCredentialDelivery::class)->queue($owner, $business, $temporaryPassword, $credentialGeneration);
             $auditLogger->record('admin.business.created', $request->user(), $request, [
                 'business_id' => $business->id,
                 'owner_id' => $owner->id,
