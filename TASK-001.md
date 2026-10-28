@@ -14,13 +14,13 @@ Login accepts `email` and `password`. Successful login establishes a Sanctum sta
 
 ## Provisioning and local setup
 
-1. Copy `.env.example` to `.env`, set `APP_KEY`, and provide PostgreSQL and Redis credentials.
+1. Copy `.env.example` to `.env`, set `APP_KEY`, and provide PostgreSQL credentials.
 2. Run `php artisan migrate --force`.
 3. Provision the first administrator with `php artisan admin:create`. The command prompts for the password with hidden input and requires at least 12 characters.
 4. Start Laravel and Next.js (`php artisan serve` and `npm run dev` from `frontend/`).
 5. Run `php artisan test` and `npm run build` from their respective directories.
 
-The frontend uses `credentials: include`, first requests `/sanctum/csrf-cookie`, then sends the `X-XSRF-TOKEN` header. Production/local runtime configuration is PostgreSQL + Redis in `.env.example`.
+The frontend uses `credentials: include`, first requests `/sanctum/csrf-cookie`, then sends the `X-XSRF-TOKEN` header. Production/local runtime configuration is PostgreSQL with database-backed queue and cache settings in `.env.example`.
 
 ## Structure
 
@@ -34,7 +34,6 @@ The frontend uses `credentials: include`, first requests `/sanctum/csrf-cookie`,
 ## Limitations and risks
 
 - PostgreSQL service is running, but PHP CLI has no `pdo_pgsql` driver, so actual PostgreSQL migrations and integration tests remain unverified.
-- Redis is configured but no service is listening on `127.0.0.1:6379`; Redis-backed rate-limit/cache verification remains unverified.
-- Login rate limits are cache-store dependent; use the configured shared Redis cache in a multi-instance deployment.
+- Queue jobs and cache entries use PostgreSQL; run a Laravel queue worker with `php artisan queue:work`.
 - The frontend’s protected layout is a UX guard only; Laravel remains the authorization boundary.
 - Token expiry, password reset, MFA, and admin management are intentionally out of scope for TASK-001.

@@ -56,7 +56,7 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['current_password' => 'This temporary password has expired. Contact the platform administrator.']);
         }
 
-        $data = $request->validate(['current_password' => ['required', 'string'], 'password' => ['required', 'string', 'min:12', 'max:128', 'confirmed']]);
+        $data = $request->validate(['current_password' => ['required', 'string'], 'password' => ['required', 'string', 'min:8', 'max:128', 'confirmed']]);
         if (! Hash::check($data['current_password'], $owner->password)) {
             throw ValidationException::withMessages(['current_password' => 'The temporary password is incorrect.']);
         }

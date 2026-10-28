@@ -5,9 +5,18 @@ use App\Http\Controllers\Api\V1\Admin\BusinessController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionPlanController;
 use App\Http\Controllers\Api\V1\Admin\BusinessSubscriptionController;
 use App\Http\Controllers\Api\V1\Owner\AuthController as OwnerAuthController;
+use App\Http\Controllers\Api\V1\Auth\UnifiedAuthController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('v1/health', fn () => response()->json(['status' => 'ok']))->name('api.v1.health');
+
+Route::prefix('v1/auth')->group(function () {
+    Route::post('login', [UnifiedAuthController::class, 'login'])->middleware('throttle:unified-login');
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('me', [UnifiedAuthController::class, 'me']);
+        Route::post('logout', [UnifiedAuthController::class, 'logout']);
+    });
+});
 
 Route::prefix('v1/owner/auth')->group(function () {
     Route::post('login', [OwnerAuthController::class, 'login'])->middleware('throttle:owner-login');

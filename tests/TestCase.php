@@ -12,8 +12,8 @@ abstract class TestCase extends BaseTestCase
             throw new \RuntimeException('Tests must use PostgreSQL database traf_management_test.');
         }
 
-        if ((string) config('database.redis.default.database') !== '2' || (string) config('database.redis.cache.database') !== '3') {
-            throw new \RuntimeException('Tests must use Redis queue database 2 and cache database 3.');
+        if (config('cache.default') !== 'database' || config('queue.default') !== 'database') {
+            throw new \RuntimeException('Tests must use database cache and database queue.');
         }
     }
 }
