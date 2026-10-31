@@ -67,27 +67,32 @@ class SubscriptionPlanController extends Controller
 
     public function publish(SubscriptionPlan $plan, Request $request, AuditLogger $auditLogger)
     {
-        if ($plan->status !== SubscriptionPlan::STATUS_DRAFT) {
-            throw ValidationException::withMessages(['status' => 'Only draft plans can be published.']);
+        if (! in_array($plan->status, [SubscriptionPlan::STATUS_DRAFT, SubscriptionPlan::STATUS_ARCHIVED], true)) {
+            throw ValidationException::withMessages(['status' => 'Only draft or archived plans can be published.']);
         }
 
         $version = DB::transaction(function () use ($plan, $request, $auditLogger): SubscriptionPlanVersion {
             $publishedAt = now();
-            $version = SubscriptionPlanVersion::create([
-                'subscription_plan_id' => $plan->id,
-                'version' => $plan->current_version,
-                'name' => $plan->name,
-                'slug' => $plan->slug,
-                'description' => $plan->description,
-                'monthly_price_paisa' => $plan->monthly_price_paisa,
-                'yearly_price_paisa' => $plan->yearly_price_paisa,
-                'module_entitlements' => $plan->module_entitlements,
-                'max_turfs' => $plan->max_turfs,
-                'max_branches' => $plan->max_branches,
-                'max_staff' => $plan->max_staff,
-                'published_by_platform_admin_id' => $request->user()?->getKey(),
-                'published_at' => $publishedAt,
-            ]);
+            $version = $plan->status === SubscriptionPlan::STATUS_ARCHIVED
+                ? $plan->versions()->where('version', $plan->current_version)->first()
+                : null;
+            if (! $version) {
+                $version = SubscriptionPlanVersion::create([
+                    'subscription_plan_id' => $plan->id,
+                    'version' => $plan->current_version,
+                    'name' => $plan->name,
+                    'slug' => $plan->slug,
+                    'description' => $plan->description,
+                    'monthly_price_paisa' => $plan->monthly_price_paisa,
+                    'yearly_price_paisa' => $plan->yearly_price_paisa,
+                    'module_entitlements' => $plan->module_entitlements,
+                    'max_turfs' => $plan->max_turfs,
+                    'max_branches' => $plan->max_branches,
+                    'max_staff' => $plan->max_staff,
+                    'published_by_platform_admin_id' => $request->user()?->getKey(),
+                    'published_at' => $publishedAt,
+                ]);
+            }
             $plan->update(['status' => SubscriptionPlan::STATUS_PUBLISHED, 'published_at' => $publishedAt, 'archived_at' => null]);
             $auditLogger->record('admin.subscription_plan.published', $request->user(), $request, ['plan_id' => $plan->id, 'version' => $version->version]);
 

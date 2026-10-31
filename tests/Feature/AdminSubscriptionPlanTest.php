@@ -53,13 +53,13 @@ class AdminSubscriptionPlanTest extends TestCase
         $this->assertCount(2, SubscriptionPlanVersion::where('subscription_plan_id', $plan->id)->get());
     }
 
-    public function test_archived_plan_cannot_be_edited_or_published(): void
+    public function test_archived_plan_cannot_be_edited_but_can_be_published_again(): void
     {
         $plan = $this->createPlan();
 
         $this->adminSession()->postJson('/api/v1/admin/plans/'.$plan->id.'/archive')->assertOk()->assertJsonPath('data.status', 'archived');
         $this->adminSession()->putJson('/api/v1/admin/plans/'.$plan->id, ['name' => 'Not Allowed'])->assertUnprocessable()->assertJsonValidationErrors('status');
-        $this->adminSession()->postJson('/api/v1/admin/plans/'.$plan->id.'/publish')->assertUnprocessable()->assertJsonValidationErrors('status');
+        $this->adminSession()->postJson('/api/v1/admin/plans/'.$plan->id.'/publish')->assertOk()->assertJsonPath('data.status', 'published');
     }
 
     private function createPlan(): SubscriptionPlan
